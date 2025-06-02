@@ -1,6 +1,6 @@
-# Lead Router Automation
+# Lead Router Automation Tool
 
-Automates data entry from Google Sheets into WordPress Gravity Forms to eliminate manual entry of hundreds of CRM and text addresses. Uses Python with Selenium for browser automation and Google APIs for sheet integration.
+This tool automates the configuration of Gravity Forms notification routing rules by reading data from Google Sheets.
 
 ## 🚨 Important Prerequisites
 
@@ -12,103 +12,176 @@ Before starting, ensure:
 
 ## 📋 System Requirements
 
-- **Python 3.8+**
-- **Google Chrome** (latest version 137)
-- **Git**
+- **Python**: 3.8 or higher (3.12 recommended, 3.13 has some package compatibility issues)
+- **Operating System**: Windows, macOS, or Linux
+- **Browser**: Google Chrome
+- **Memory**: At least 2GB RAM
+- **Network**: Internet connection for Google Sheets API and web automation
 
 ## 🔧 Installation
 
-### 1. Clone Repository
+### Quick Setup (Recommended)
 
+1. **Clone/Download** this project to your computer
+2. **Run the setup script**:
+   ```bash
+   python setup.py
+   ```
+
+The setup script will:
+- Check your Python version compatibility
+- Install all required packages
+- Create configuration templates
+- Guide you through the setup process
+
+### Manual Installation
+
+If the quick setup doesn't work, follow these steps:
+
+#### Step 1: Check Python Version
+This tool works with **Python 3.8 or higher**. Check your version:
 ```bash
-git clone https://github.com/yourusername/lead-router.git
-cd lead-router
+python --version
+# or
+python3 --version
 ```
 
-### 2. Install Python Dependencies
-
+#### Step 2: Create Virtual Environment (Recommended)
 ```bash
+# Create virtual environment
+python -m venv leadrouter-env
+
+# Activate it
+# On macOS/Linux:
+source leadrouter-env/bin/activate
+# On Windows:
+leadrouter-env\Scripts\activate
+```
+
+#### Step 3: Install Dependencies
+```bash
+# Upgrade pip first (important!)
+python -m pip install --upgrade pip
+
+# Install requirements
 pip install -r requirements.txt
 ```
 
-### 3. Verify Pre-Configured Files
+### 🐛 Troubleshooting Installation Issues
 
-✅ **All credentials are pre-configured in this private repo:**
-- `credentials.json` - Google Sheets API credentials
-- `token.json` - OAuth token for Google authentication  
-- `.env` - Environment variables with Chrome paths
-- `chrome-for-testing/` - Chrome browser and ChromeDriver
-
-**No additional setup required!** 🎉
-
-## ✅ Pre-Run Checks
-
-Before running the script, verify:
+#### For Python 3.13 Users
+Python 3.13 is very new and some packages may not have pre-built wheels yet. Try:
 
 ```bash
-# Check Python version (3.8+)
-python --version
+# Option 1: Use --prefer-binary flag
+pip install --prefer-binary -r requirements.txt
 
-# Check Chrome installation
-/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --version
+# Option 2: If that fails, install packages individually
+pip install google-auth-oauthlib google-auth-httplib2 google-api-python-client selenium python-dotenv
 
-# Check ChromeDriver (included in repo)
-./chrome-for-testing/chromedriver --version
+# Option 3: Use Python 3.12 instead (recommended for now)
+```
 
-# Verify WARP VPN is OFF
-# Check your system tray/menu bar - WARP must be disconnected
+#### Common Issues
+- **"Failed building wheel for pandas"**: This should be fixed now (pandas was removed as it's not used)
+- **"No module named 'X'"**: Make sure you activated your virtual environment
+- **Permission errors**: Try adding `--user` flag: `pip install --user -r requirements.txt`
 
-# Verify all required files are present
-ls -la credentials.json .env token.json requirements.txt main.py
+## 📋 Configuration
+
+### 1. Google API Setup
+1. Create a Google Cloud project and enable the Sheets API
+2. Download your `credentials.json` file
+3. Place it in the project directory
+
+### 2. Chrome/ChromeDriver Setup
+1. Download ChromeDriver from [Chrome for Testing](https://googlechromelabs.github.io/chrome-for-testing/)
+2. Extract to `./chrome-for-testing/chromedriver`
+3. Make sure Google Chrome is installed
+
+### 3. Environment Configuration
+1. Copy `.env.template` to `.env`
+2. Update the paths in `.env` for your system:
+
+```bash
+# macOS
+CHROME_BINARY_PATH=/Applications/Google Chrome.app/Contents/MacOS/Google Chrome
+CHROMEDRIVER_PATH=./chrome-for-testing/chromedriver
+
+# Windows
+CHROME_BINARY_PATH=C:\Program Files\Google\Chrome\Application\chrome.exe
+CHROMEDRIVER_PATH=./chrome-for-testing/chromedriver.exe
+
+# Linux
+CHROME_BINARY_PATH=/usr/bin/google-chrome
+CHROMEDRIVER_PATH=./chrome-for-testing/chromedriver
 ```
 
 ## 🚀 Usage
 
-### 1. Prepare Your Google Sheet
+1. **Prepare your Google Sheet** with columns:
+   - `DEALERSHIP NAME`
+   - `FEED ID`
+   - `ADF Email`
+   - `Text Email`
 
-Your sheet must have a tab named **"Combined Feed Info"** with these exact columns:
-- `DEALERSHIP NAME`
-- `FEED ID` 
-- `ADF Email`
-- `Text Email`
+2. **Run the automation**:
+   ```bash
+   python main.py
+   ```
 
-**⚠️ All cells must be filled** - empty cells will cause the script to abort.
+3. **Follow the prompts**:
+   - Enter your Google Sheet URL or ID
+   - Enter your WordPress site URL
+   - Complete manual authentication in the browser window
 
-### 2. Run the Script
+## 🔍 System Requirements
 
-```bash
-python main.py
-```
+- **Python**: 3.8 or higher (3.12 recommended, 3.13 has some package compatibility issues)
+- **Operating System**: Windows, macOS, or Linux
+- **Browser**: Google Chrome
+- **Memory**: At least 2GB RAM
+- **Network**: Internet connection for Google Sheets API and web automation
 
-### 3. Provide Required Information
+## 📊 Supported Python Versions
 
-The script will prompt for:
-- **Google Sheet URL or ID**
-- **WordPress site URL** (e.g., `https://yoursite.com`)
+| Python Version | Status | Notes |
+|---------------|--------|-------|
+| 3.8           | ✅ Supported | Minimum version |
+| 3.9           | ✅ Supported | Fully tested |
+| 3.10          | ✅ Supported | Fully tested |
+| 3.11          | ✅ Supported | Fully tested |
+| 3.12          | ✅ Recommended | Best compatibility |
+| 3.13          | ⚠️ Limited | Some packages may need manual installation |
 
-### 4. Manual Authentication (CRITICAL)
+## 🛠️ Development
 
-🔴 **DISABLE WARP VPN BEFORE THIS STEP**
+If you need to modify the code:
 
-When the automation Chrome window opens (with yellow bar):
+1. Install in development mode:
+   ```bash
+   pip install -e .
+   ```
 
-1. **Look for the YELLOW BAR** saying "Chrome is being controlled by automated test software"
-2. **Navigate to the WordPress admin URL** shown in terminal (copy/paste - don't click terminal links)
-3. **Complete authentication sequence**:
-   - Website login credentials
-   - Jumpcloud SSO authentication  
-   - Reach WordPress admin dashboard
-4. **Verify you see** the WordPress admin menu on the left side
-5. **Press Enter** in terminal to continue automation
+2. The main automation logic is in `main.py`
+3. Configuration handling is in the `LeadRouter` class
 
-### 5. Automation Process
+## 📝 Changelog
 
-The script will automatically:
-- Navigate to Gravity Forms
-- Find all active forms
-- Configure ADF/XML and Text notifications for each form
-- Set up routing rules based on your sheet data
-- Provide progress updates and completion summary
+### Latest Version
+- ✅ Removed pandas dependency (not used, caused Python 3.13 issues)
+- ✅ Updated package versions for better compatibility
+- ✅ Added cross-version installation script
+- ✅ Improved error handling and troubleshooting guidance
+
+## 🆘 Getting Help
+
+If you're still having issues:
+
+1. **Check the error message** - most issues are in the installation step
+2. **Try using Python 3.12** instead of 3.13 if you're having package issues
+3. **Make sure you're using a virtual environment**
+4. **Update pip** before installing: `python -m pip install --upgrade pip`
 
 ## 🔍 Troubleshooting
 
