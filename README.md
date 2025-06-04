@@ -7,16 +7,14 @@ This tool automates the configuration of Gravity Forms notification routing rule
 Before starting, ensure:
 
 - **WARP VPN MUST BE DISABLED** - The script cannot access Jumpcloud SSO with WARP enabled
-- **Fresh Chrome Profile Required** - First run creates a new automation profile
-- **Manual Authentication** - You must manually complete website login → Jumpcloud SSO → WordPress admin
+- **Manual Authentication** - You must manually complete website login → Jumpcloud SSO → WordPress admin in the automation window
+- **Chrome must be at version 137** - This is due to the chrome-driver binary 
 
 ## 📋 System Requirements
 
-- **Python**: 3.8 or higher (3.12 recommended, 3.13 has some package compatibility issues)
-- **Operating System**: Windows, macOS, or Linux
-- **Browser**: Google Chrome
-- **Memory**: At least 2GB RAM
-- **Network**: Internet connection for Google Sheets API and web automation
+- **Python**: 3.8 or higher
+- **Operating System**: macOS
+- **Chrome**: Version 317+
 
 ## 🔧 Installation
 
@@ -45,6 +43,12 @@ python --version
 # or
 python3 --version
 ```
+Install Homebrew first
+```/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"```
+
+Then install Git ```$ brew install git```
+
+If python is needed download from - https://www.python.org/downloads/
 
 #### Step 2: Create Virtual Environment (Recommended)
 ```bash
@@ -54,8 +58,6 @@ python -m venv leadrouter-env
 # Activate it
 # On macOS/Linux:
 source leadrouter-env/bin/activate
-# On Windows:
-leadrouter-env\Scripts\activate
 ```
 
 #### Step 3: Install Dependencies
@@ -69,53 +71,18 @@ pip install -r requirements.txt
 
 ### 🐛 Troubleshooting Installation Issues
 
-#### For Python 3.13 Users
-Python 3.13 is very new and some packages may not have pre-built wheels yet. Try:
-
-```bash
-# Option 1: Use --prefer-binary flag
-pip install --prefer-binary -r requirements.txt
-
-# Option 2: If that fails, install packages individually
-pip install google-auth-oauthlib google-auth-httplib2 google-api-python-client selenium python-dotenv
-
-# Option 3: Use Python 3.12 instead (recommended for now)
-```
 
 #### Common Issues
-- **"Failed building wheel for pandas"**: This should be fixed now (pandas was removed as it's not used)
 - **"No module named 'X'"**: Make sure you activated your virtual environment
 - **Permission errors**: Try adding `--user` flag: `pip install --user -r requirements.txt`
 
 ## 📋 Configuration
 
-### 1. Google API Setup
-1. Create a Google Cloud project and enable the Sheets API
-2. Download your `credentials.json` file
-3. Place it in the project directory
-
-### 2. Chrome/ChromeDriver Setup
-1. Download ChromeDriver from [Chrome for Testing](https://googlechromelabs.github.io/chrome-for-testing/)
-2. Extract to `./chrome-for-testing/chromedriver`
-3. Make sure Google Chrome is installed
-
-### 3. Environment Configuration
-1. Copy `.env.template` to `.env`
-2. Update the paths in `.env` for your system:
 
 ```bash
 # macOS
 CHROME_BINARY_PATH=/Applications/Google Chrome.app/Contents/MacOS/Google Chrome
 CHROMEDRIVER_PATH=./chrome-for-testing/chromedriver
-
-# Windows
-CHROME_BINARY_PATH=C:\Program Files\Google\Chrome\Application\chrome.exe
-CHROMEDRIVER_PATH=./chrome-for-testing/chromedriver.exe
-
-# Linux
-CHROME_BINARY_PATH=/usr/bin/google-chrome
-CHROMEDRIVER_PATH=./chrome-for-testing/chromedriver
-```
 
 ## 🚀 Usage
 
@@ -143,36 +110,6 @@ CHROMEDRIVER_PATH=./chrome-for-testing/chromedriver
 - **Memory**: At least 2GB RAM
 - **Network**: Internet connection for Google Sheets API and web automation
 
-## 📊 Supported Python Versions
-
-| Python Version | Status | Notes |
-|---------------|--------|-------|
-| 3.8           | ✅ Supported | Minimum version |
-| 3.9           | ✅ Supported | Fully tested |
-| 3.10          | ✅ Supported | Fully tested |
-| 3.11          | ✅ Supported | Fully tested |
-| 3.12          | ✅ Recommended | Best compatibility |
-| 3.13          | ⚠️ Limited | Some packages may need manual installation |
-
-## 🛠️ Development
-
-If you need to modify the code:
-
-1. Install in development mode:
-   ```bash
-   pip install -e .
-   ```
-
-2. The main automation logic is in `main.py`
-3. Configuration handling is in the `LeadRouter` class
-
-## 📝 Changelog
-
-### Latest Version
-- ✅ Removed pandas dependency (not used, caused Python 3.13 issues)
-- ✅ Updated package versions for better compatibility
-- ✅ Added cross-version installation script
-- ✅ Improved error handling and troubleshooting guidance
 
 ## 🆘 Getting Help
 
@@ -226,7 +163,6 @@ lead-router/
 ├── token.json            # Generated OAuth token
 └── chrome-for-testing/   # Chrome automation browser
     ├── chromedriver      # WebDriver executable
-    └── chrome-*/         # Chrome for Testing browser
 ```
 
 ## 🔒 Security Notes
@@ -236,6 +172,7 @@ lead-router/
 - **Use the automation Chrome profile only** for this script
 - **Fresh profile isolates** automation from your personal browsing
 - **WARP VPN must be disabled** during authentication for Jumpcloud SSO access
+- **Google Cloud Console Sheets API** this gives all users in org access to the sheets API with these pre-configured credentials
 
 ## 🎯 Features
 
