@@ -80,10 +80,6 @@ python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-### Step 5: Set Up Google Credentials
-1. Download your `credentials.json` file (provided by admin)
-2. Place it in the `lead-router` folder
-
 ## 🚀 How to Use
 
 ### Step 1: Prepare Your Google Sheet
@@ -101,17 +97,17 @@ python main.py
 ### Step 3: Follow the Prompts
 1. **Enter Google Sheet URL** - Paste your sheet URL or ID
 2. **Enter WordPress URL** - Enter your site URL (e.g., https://yoursite.com)
-3. **Wait for Chrome to open** - Look for window with yellow bar saying "Chrome is being controlled by automated test software"
+3. **Wait for Chrome to open** - Look for window with top bar saying "Chrome is being controlled by automated test software"
 
 ### Step 4: Complete Authentication
-In the **automation Chrome window** (with yellow bar):
+In the **automation Chrome window** (with top bar):
 1. Navigate to your WordPress admin dashboard
 2. Complete website login → Jumpcloud SSO → WordPress admin
 3. Make sure you reach the WordPress dashboard
-4. Press Enter in the terminal when ready
+4. Press Enter in the terminal when ready - watch the magic!
 
-### Step 5: Answer Prompts
-- Script will ask about Text Notifications for location-based forms
+### Step 5: Answer Prompt
+- Script will ask about Text Notifications for location-based forms if any are found
 - Choose 'y' for yes or 'n' for no
 
 ### Step 6: Wait for Completion
@@ -185,14 +181,14 @@ The script automatically detects two types of forms:
 lead-router/
 ├── main.py              # Main script
 ├── requirements.txt     # Dependencies  
-├── credentials.json     # Google API credentials (you add this)
+├── credentials.json     # Google API credentials
 ├── token.json          # Generated automatically
 └── README.md           # This file
 ```
 
 ## ⚠️ Important Notes
 
-- **Use only the automation Chrome window** (with yellow bar)
+- **Use only the automation Chrome window** (with top bar)
 - **Keep the automation window open** during the process
 - **WARP VPN must be OFF** for authentication to work
 - **Don't interact with the automation window** while script is running
