@@ -46,6 +46,7 @@ class LeadRouter:
         self.headless = headless
         self.sheet_id = sheet_id
         self.wp_url = wp_url
+        self.add_text_notifications = None  # Will be set by user prompt
         self.setup_browser()
 
     def setup_browser(self, port=9222):
@@ -201,6 +202,135 @@ class LeadRouter:
             return []
         logger.info(f"Extracted {len(extracted)} rows with required columns.")
         return extracted
+
+    def prompt_for_text_notifications(self):
+        """Ask user if they want to add Text Notifications for inventory forms with location fields"""
+        if self.add_text_notifications is None:
+            print("\n" + "="*60)
+            print("TEXT NOTIFICATIONS CONFIGURATION")
+            print("="*60)
+            print("For inventory forms that use location-based routing (Choose A Location),")
+            print("would you like to also configure Text Notifications?")
+            print("")
+            while True:
+                response = input("Add Text Notifications to location-based forms? (y/n): ").lower().strip()
+                if response in ['y', 'yes']:
+                    self.add_text_notifications = True
+                    print("✓ Text Notifications will be configured for location-based forms")
+                    break
+                elif response in ['n', 'no']:
+                    self.add_text_notifications = False
+                    print("✓ Text Notifications will be skipped for location-based forms")
+                    break
+                else:
+                    print("Please enter 'y' for yes or 'n' for no")
+            print("="*60)
+            
+        return self.add_text_notifications
+
+    def check_form_has_dealer_id(self, driver, wait, form_id):
+        """Check if a form should use Dealer ID routing or location-based routing.
+        Location fields take PRIORITY over Dealer ID fields."""
+        try:
+            print(f"Checking routing priority for form {form_id}...")
+            
+            # Navigate to form notifications to check available fields
+            notifications_url = f"{self.wp_url.rstrip('/')}/wp/wp-admin/admin.php?page=gf_edit_forms&view=settings&subview=notification&id={form_id}"
+            driver.get(notifications_url)
+            wait.until(EC.presence_of_element_located((By.LINK_TEXT, "Notifications")))
+            
+            # Try to find ADF/XML notification to check available routing fields
+            notification_selectors = [
+                "//a[strong[text()='ADF/XML Formatted Notification']]",
+                "//strong[text()='ADF/XML Formatted Notification']/parent::a",
+                "//a[contains(@href, 'notification') and contains(., 'ADF/XML Formatted Notification')]"
+            ]
+            
+            notification_link = None
+            for selector in notification_selectors:
+                try:
+                    notification_link = wait.until(EC.element_to_be_clickable((By.XPATH, selector)))
+                    break
+                except:
+                    continue
+            
+            if not notification_link:
+                print(f"Could not find ADF/XML notification for form {form_id} - defaulting to Dealer ID routing")
+                return True  # Default to Dealer ID if we can't check
+            
+            # Click the notification
+            notification_link.click()
+            
+            # Ensure Configure Routing is selected
+            try:
+                routing_radio = wait.until(EC.presence_of_element_located((By.ID, "gform_notification_to_type_routing")))
+                if not routing_radio.is_selected():
+                    routing_radio.click()
+                    time.sleep(0.5)  # Wait for routing fields to load
+            except:
+                print(f"Could not find routing option for form {form_id}")
+                return True  # Default to Dealer ID if we can't configure routing
+            
+            # Check available routing fields with LOCATION PRIORITY
+            try:
+                # Look for the first routing field dropdown
+                if_dropdown = driver.find_element(By.ID, "routing_field_id_0")
+                from selenium.webdriver.support.ui import Select
+                select = Select(if_dropdown)
+                
+                # Check all available options
+                available_options = [option.text for option in select.options]
+                print(f"Available routing fields: {available_options}")
+                
+                # Check for location fields first (PRIORITY)
+                location_field_names = [
+                    "Choose A Location",
+                    "Location", 
+                    "Dealership Location",
+                    "Store Location",
+                    "Dealer Location"
+                ]
+                
+                has_location = False
+                location_field_found = None
+                for location_name in location_field_names:
+                    if location_name in available_options:
+                        has_location = True
+                        location_field_found = location_name
+                        break
+                
+                # Also check for any field containing "location" in the name
+                if not has_location:
+                    for option in available_options:
+                        if "location" in option.lower():
+                            has_location = True
+                            location_field_found = option
+                            break
+                
+                has_dealer_id = "Dealer ID" in available_options
+                
+                print(f"Form {form_id} field analysis:")
+                print(f"  - Has location field: {has_location} ({'(' + location_field_found + ')' if location_field_found else ''})")
+                print(f"  - Has Dealer ID field: {has_dealer_id}")
+                
+                # PRIORITY LOGIC: Location fields take precedence over Dealer ID
+                if has_location:
+                    print(f"  ➤ USING LOCATION-BASED ROUTING (Priority: {location_field_found})")
+                    return False  # Return False to indicate "don't use Dealer ID routing"
+                elif has_dealer_id:
+                    print(f"  ➤ USING DEALER-ID-BASED ROUTING (No location field found)")
+                    return True   # Return True to indicate "use Dealer ID routing"
+                else:
+                    print(f"  ➤ WARNING: Neither location nor Dealer ID field found - defaulting to Dealer ID")
+                    return True   # Default to Dealer ID if neither is found
+                
+            except Exception as e:
+                print(f"Could not check routing fields for form {form_id}: {e}")
+                return True  # Default to Dealer ID if we can't check
+                
+        except Exception as e:
+            print(f"Error checking form {form_id} routing priority: {e}")
+            return True  # Default to Dealer ID if we can't check
 
     def automate_form_notifications(self, sheet_data):
         """
@@ -439,16 +569,32 @@ class LeadRouter:
                         print(f"Form {form_id} did not load properly: {e}")
                         continue
 
+                    # Check if this form has Dealer ID field available
+                    has_dealer_id = self.check_form_has_dealer_id(driver, wait, form_id)
+                    use_location_routing = not has_dealer_id
+                    
+                    if use_location_routing:
+                        print(f"✓ Form {form_id} will use LOCATION-BASED routing (Choose A Location)")
+                        print(f"  - Field: Choose A Location")
+                        print(f"  - Condition: IS")  
+                        print(f"  - Value: Dealership Name from sheet")
+                        print(f"  - Email: Corresponding email from dropdown menu")
+                    else:
+                        print(f"✓ Form {form_id} will use DEALER-ID-BASED routing (standard)")
+                        print(f"  - Field: Dealer ID")
+                        print(f"  - Condition: IS")
+                        print(f"  - Value: Feed ID from sheet")
+
                     # Go to Form Settings > Notifications
                     driver.find_element(By.LINK_TEXT, "Form Settings").click()
                     wait.until(EC.presence_of_element_located((By.LINK_TEXT, "Notifications")))
                     driver.find_element(By.LINK_TEXT, "Notifications").click()
 
                     # Process ADF/XML notification first
-                    self._process_notification(driver, wait, sheet_data, "ADF/XML Formatted Notification", "ADF Email", form_title, form_id, Select)
+                    self._process_notification(driver, wait, sheet_data, "ADF/XML Formatted Notification", "ADF Email", form_title, form_id, Select, use_location_routing)
                     
-                    # Process Text notification second  
-                    self._process_notification(driver, wait, sheet_data, "Text Formatted Notification", "Text Email", form_title, form_id, Select)
+                    # Process Text notification second (will prompt user for location-based forms)
+                    self._process_notification(driver, wait, sheet_data, "Text Formatted Notification", "Text Email", form_title, form_id, Select, use_location_routing)
                     
                     # Mark this form as completed
                     completed_form_ids.add(form_id)
@@ -565,10 +711,16 @@ class LeadRouter:
             import traceback
             traceback.print_exc()
 
-    def _process_notification(self, driver, wait, sheet_data, notification_name, email_column, form_title, form_id, Select):
+    def _process_notification(self, driver, wait, sheet_data, notification_name, email_column, form_title, form_id, Select, use_location_routing=False):
         """Helper method to process a single notification type"""
         try:
-            # 3c. Find and click the ADF/XML Formatted Notification link directly
+            # For location-based routing, ask user about Text Notifications
+            if use_location_routing and notification_name == "Text Formatted Notification":
+                if not self.prompt_for_text_notifications():
+                    print(f"Skipping {notification_name} for location-based form as requested by user")
+                    return
+            
+            # 3c. Find and click the notification link directly
             print(f"Looking for {notification_name} link...")
             notification_link = None
             
@@ -629,6 +781,7 @@ class LeadRouter:
                 if not routing_radio.is_selected():
                     print(f"Selecting Configure Routing for {notification_name}...")
                     routing_radio.click()
+                    time.sleep(0.5)  # Wait for routing options to load
                 else:
                     print(f"{notification_name} Configure Routing is already selected")
             except Exception as e:
@@ -637,6 +790,9 @@ class LeadRouter:
 
             # 3e. Fill blank rules first, then add new ones if needed
             print(f"Configuring {notification_name} routing rules (filling blanks first)...")
+            routing_type = "location-based" if use_location_routing else "dealer-id-based"
+            print(f"Using {routing_type} routing strategy")
+            
             try:
                 # Find all existing email fields and check which are blank
                 all_email_fields = driver.find_elements(By.XPATH, f"//input[starts-with(@id, 'routing_email_')]")
@@ -687,17 +843,153 @@ class LeadRouter:
                         email_field.clear()
                         email_field.send_keys(row[email_column])
                         
-                        # Set dropdown fields
+                        # Set dropdown fields based on routing type
                         if_dropdown = driver.find_element(By.ID, f"routing_field_id_{rule_index}")
-                        Select(if_dropdown).select_by_visible_text("Dealer ID")
+                        
+                        if use_location_routing:
+                            # Use location-based routing with priority field selection
+                            location_field_names = [
+                                "Choose A Location"
+                            ]
+                            
+                            field_selected = False
+                            selected_field_name = None
+                            
+                            # Try to select the highest priority location field available
+                            for location_name in location_field_names:
+                                try:
+                                    Select(if_dropdown).select_by_visible_text(location_name)
+                                    selected_field_name = location_name
+                                    field_selected = True
+                                    print(f"  ✓ Selected priority location field: {location_name}")
+                                    break
+                                except:
+                                    continue
+                            
+                            # If none of the priority fields worked, try any field containing "location"
+                            if not field_selected:
+                                select_obj = Select(if_dropdown)
+                                for option in select_obj.options:
+                                    if "location" in option.text.lower():
+                                        try:
+                                            select_obj.select_by_visible_text(option.text)
+                                            selected_field_name = option.text
+                                            field_selected = True
+                                            print(f"  ✓ Selected location field: {option.text}")
+                                            break
+                                        except:
+                                            continue
+                            
+                            # Last resort: select first non-default option
+                            if not field_selected:
+                                print(f"  ⚠️  No location field found, selecting first available option")
+                                select_obj = Select(if_dropdown)
+                                if len(select_obj.options) > 1:  # Skip the default "Select a Field" option
+                                    select_obj.select_by_index(1)
+                                    selected_field_name = select_obj.first_selected_option.text
+                                    print(f"  ⚠️  Selected fallback field: {selected_field_name}")
+                        else:
+                            Select(if_dropdown).select_by_visible_text("Dealer ID")
                         
                         is_dropdown = driver.find_element(By.ID, f"routing_operator_{rule_index}")
                         Select(is_dropdown).select_by_visible_text("is")
                         
-                        # Fill value field
                         value_field = driver.find_element(By.ID, f"routing_value_{rule_index}")
-                        value_field.clear()
-                        value_field.send_keys(row['FEED ID'])
+                        
+                        if use_location_routing:
+                            # For location routing, use dealership name from Google Sheet
+                            dealership_name = row['DEALERSHIP NAME']
+                            corresponding_email = row[email_column]
+                            
+                            print(f"  Looking for dealership: '{dealership_name}' (email: {corresponding_email})")
+                            
+                            # Ensure the value field is visible and interactable
+                            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", value_field)
+                            time.sleep(0.5)
+                            
+                            # Try to select the dealership name from dropdown
+                            try:
+                                # Wait for element to be clickable and check if it's a select element
+                                wait.until(EC.element_to_be_clickable(value_field))
+                                
+                                if value_field.tag_name.lower() == 'select':
+                                    # It's a dropdown - use Select
+                                    value_dropdown = Select(value_field)
+                                    available_options = []
+                                    
+                                    # Get all option texts safely
+                                    for option in value_dropdown.options:
+                                        option_text = option.text.strip()
+                                        if option_text:  # Only add non-empty options
+                                            available_options.append(option_text)
+                                    
+                                    print(f"  Available location options ({len(available_options)}): {available_options[:10]}{'...' if len(available_options) > 10 else ''}")
+                                    
+                                    # First priority: Try to find exact dealership name match
+                                    dealership_found = False
+                                    for option_text in available_options:
+                                        if option_text == dealership_name:
+                                            try:
+                                                value_dropdown.select_by_visible_text(option_text)
+                                                print(f"  ✓ Selected exact dealership match: '{option_text}'")
+                                                dealership_found = True
+                                                break
+                                            except Exception as select_error:
+                                                print(f"  ! Error selecting exact match '{option_text}': {select_error}")
+                                                continue
+                                    
+                                    # Second priority: Try partial dealership name match
+                                    if not dealership_found:
+                                        for option_text in available_options:
+                                            if (dealership_name.lower() in option_text.lower() or 
+                                                option_text.lower() in dealership_name.lower()):
+                                                try:
+                                                    value_dropdown.select_by_visible_text(option_text)
+                                                    print(f"  ✓ Selected partial dealership match: '{option_text}' (for '{dealership_name}')")
+                                                    dealership_found = True
+                                                    break
+                                                except Exception as select_error:
+                                                    print(f"  ! Error selecting partial match '{option_text}': {select_error}")
+                                                    continue
+                                    
+                                    # Third priority: Try to find the corresponding email in dropdown
+                                    if not dealership_found:
+                                        for option_text in available_options:
+                                            if corresponding_email.lower() in option_text.lower():
+                                                try:
+                                                    value_dropdown.select_by_visible_text(option_text)
+                                                    print(f"  ✓ Selected email match in dropdown: '{option_text}'")
+                                                    dealership_found = True
+                                                    break
+                                                except Exception as select_error:
+                                                    print(f"  ! Error selecting email match '{option_text}': {select_error}")
+                                                    continue
+                                    
+                                    # If nothing found, warn user but don't change selection
+                                    if not dealership_found:
+                                        print(f"  ⚠️  WARNING: Could not find '{dealership_name}' in dropdown options")
+                                        print(f"  ⚠️  Available options (first 10): {available_options[:10]}")
+                                        print(f"  ⚠️  Leaving current selection unchanged")
+                                        
+                                else:
+                                    # It's a text field, not dropdown - clear and type the dealership name
+                                    value_field.clear()
+                                    value_field.send_keys(dealership_name)
+                                    print(f"  ✓ Entered dealership name in text field: '{dealership_name}'")
+                                    
+                            except Exception as dropdown_error:
+                                print(f"  ! Error interacting with value field: {dropdown_error}")
+                                # Try fallback approach - clear and type
+                                try:
+                                    value_field.clear()
+                                    value_field.send_keys(dealership_name)
+                                    print(f"  ✓ Fallback: Entered dealership name as text: '{dealership_name}'")
+                                except Exception as fallback_error:
+                                    print(f"  ✗ Fallback also failed: {fallback_error}")
+                        else:
+                            # Use Feed ID for Dealer ID routing
+                            value_field.clear()
+                            value_field.send_keys(row['FEED ID'])
                         
                         # Verify the fields were actually populated
                         time.sleep(0.2)  # Brief pause for field updates
@@ -706,11 +998,16 @@ class LeadRouter:
                         
                         if actual_email != row[email_column]:
                             print(f"  ! Warning: Email field shows '{actual_email}' instead of '{row[email_column]}'")
-                        if actual_value != row['FEED ID']:
-                            print(f"  ! Warning: Value field shows '{actual_value}' instead of '{row['FEED ID']}'")
+                        
+                        expected_value = row['DEALERSHIP NAME'] if use_location_routing else row['FEED ID']
+                        if actual_value != expected_value:
+                            print(f"  ! Warning: Value field shows '{actual_value}' instead of '{expected_value}'")
                             # Try again if it didn't work
                             value_field.clear()
-                            value_field.send_keys(row['FEED ID'])
+                            if use_location_routing:
+                                value_field.send_keys(row['DEALERSHIP NAME'])
+                            else:
+                                value_field.send_keys(row['FEED ID'])
                             time.sleep(0.1)
                             actual_value = value_field.get_attribute('value')
                             print(f"  ! Retry result: Value field now shows '{actual_value}'")
@@ -769,53 +1066,191 @@ class LeadRouter:
                                     except Exception as e2:
                                         print(f"    JavaScript click also failed: {e2}")
                                 
-                                if not click_successful:
+                                if click_successful:
+                                    time.sleep(0.5)
+                                    
+                                    # Calculate the new rule index
+                                    new_rule_index = existing_count + i
+                                    
+                                    # Fill the new rule
+                                    email_field = driver.find_element(By.ID, f"routing_email_{new_rule_index}")
+                                    email_field.clear()
+                                    email_field.send_keys(row[email_column])
+                                    
+                                    if_dropdown = driver.find_element(By.ID, f"routing_field_id_{new_rule_index}")
+                                    
+                                    if use_location_routing:
+                                        # Use location-based routing with priority field selection
+                                        location_field_names = [
+                                            "Choose A Location"
+                                        ]
+                                        
+                                        field_selected = False
+                                        selected_field_name = None
+                                        
+                                        # Try to select the highest priority location field available
+                                        for location_name in location_field_names:
+                                            try:
+                                                Select(if_dropdown).select_by_visible_text(location_name)
+                                                selected_field_name = location_name
+                                                field_selected = True
+                                                print(f"  ✓ Selected priority location field: {location_name}")
+                                                break
+                                            except:
+                                                continue
+                                        
+                                        # If none of the priority fields worked, try any field containing "location"
+                                        if not field_selected:
+                                            select_obj = Select(if_dropdown)
+                                            for option in select_obj.options:
+                                                if "location" in option.text.lower():
+                                                    try:
+                                                        select_obj.select_by_visible_text(option.text)
+                                                        selected_field_name = option.text
+                                                        field_selected = True
+                                                        print(f"  ✓ Selected location field: {option.text}")
+                                                        break
+                                                    except:
+                                                        continue
+                                        
+                                        # Last resort: select first non-default option
+                                        if not field_selected:
+                                            print(f"  ⚠️  No location field found, selecting first available option")
+                                            select_obj = Select(if_dropdown)
+                                            if len(select_obj.options) > 1:  # Skip the default "Select a Field" option
+                                                select_obj.select_by_index(1)
+                                                selected_field_name = select_obj.first_selected_option.text
+                                                print(f"  ⚠️  Selected fallback field: {selected_field_name}")
+                                    else:
+                                        Select(if_dropdown).select_by_visible_text("Dealer ID")
+                                    
+                                    is_dropdown = driver.find_element(By.ID, f"routing_operator_{new_rule_index}")
+                                    Select(is_dropdown).select_by_visible_text("is")
+                                    
+                                    value_field = driver.find_element(By.ID, f"routing_value_{new_rule_index}")
+                                    
+                                    if use_location_routing:
+                                        # For location routing, use dealership name from Google Sheet
+                                        dealership_name = row['DEALERSHIP NAME']
+                                        corresponding_email = row[email_column]
+                                        
+                                        print(f"  Looking for dealership: '{dealership_name}' (email: {corresponding_email})")
+                                        
+                                        # Ensure the value field is visible and interactable
+                                        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", value_field)
+                                        time.sleep(0.5)
+                                        
+                                        # Try to select the dealership name from dropdown
+                                        try:
+                                            # Wait for element to be clickable and check if it's a select element
+                                            wait.until(EC.element_to_be_clickable(value_field))
+                                            
+                                            if value_field.tag_name.lower() == 'select':
+                                                # It's a dropdown - use Select
+                                                value_dropdown = Select(value_field)
+                                                available_options = []
+                                                
+                                                # Get all option texts safely
+                                                for option in value_dropdown.options:
+                                                    option_text = option.text.strip()
+                                                    if option_text:  # Only add non-empty options
+                                                        available_options.append(option_text)
+                                                
+                                                print(f"  Available location options ({len(available_options)}): {available_options[:10]}{'...' if len(available_options) > 10 else ''}")
+                                                
+                                                # First priority: Try to find exact dealership name match
+                                                dealership_found = False
+                                                for option_text in available_options:
+                                                    if option_text == dealership_name:
+                                                        try:
+                                                            value_dropdown.select_by_visible_text(option_text)
+                                                            print(f"  ✓ Selected exact dealership match: '{option_text}'")
+                                                            dealership_found = True
+                                                            break
+                                                        except Exception as select_error:
+                                                            print(f"  ! Error selecting exact match '{option_text}': {select_error}")
+                                                            continue
+                                                
+                                                # Second priority: Try partial dealership name match
+                                                if not dealership_found:
+                                                    for option_text in available_options:
+                                                        if (dealership_name.lower() in option_text.lower() or 
+                                                            option_text.lower() in dealership_name.lower()):
+                                                            try:
+                                                                value_dropdown.select_by_visible_text(option_text)
+                                                                print(f"  ✓ Selected partial dealership match: '{option_text}' (for '{dealership_name}')")
+                                                                dealership_found = True
+                                                                break
+                                                            except Exception as select_error:
+                                                                print(f"  ! Error selecting partial match '{option_text}': {select_error}")
+                                                                continue
+                                                
+                                                # Third priority: Try to find the corresponding email in dropdown
+                                                if not dealership_found:
+                                                    for option_text in available_options:
+                                                        if corresponding_email.lower() in option_text.lower():
+                                                            try:
+                                                                value_dropdown.select_by_visible_text(option_text)
+                                                                print(f"  ✓ Selected email match in dropdown: '{option_text}'")
+                                                                dealership_found = True
+                                                                break
+                                                            except Exception as select_error:
+                                                                print(f"  ! Error selecting email match '{option_text}': {select_error}")
+                                                                continue
+                                                
+                                                # If nothing found, warn user but don't change selection
+                                                if not dealership_found:
+                                                    print(f"  ⚠️  WARNING: Could not find '{dealership_name}' in dropdown options")
+                                                    print(f"  ⚠️  Available options (first 10): {available_options[:10]}")
+                                                    print(f"  ⚠️  Leaving current selection unchanged")
+                                                    
+                                            else:
+                                                # It's a text field, not dropdown - clear and type the dealership name
+                                                value_field.clear()
+                                                value_field.send_keys(dealership_name)
+                                                print(f"  ✓ Entered dealership name in text field: '{dealership_name}'")
+                                                
+                                        except Exception as dropdown_error:
+                                            print(f"  ! Error interacting with value field: {dropdown_error}")
+                                            # Try fallback approach - clear and type
+                                            try:
+                                                value_field.clear()
+                                                value_field.send_keys(dealership_name)
+                                                print(f"  ✓ Fallback: Entered dealership name as text: '{dealership_name}'")
+                                            except Exception as fallback_error:
+                                                print(f"  ✗ Fallback also failed: {fallback_error}")
+                                    else:
+                                        # Use Feed ID for Dealer ID routing
+                                        value_field.clear()
+                                        value_field.send_keys(row['FEED ID'])
+                                    
+                                    # Verify the new rule fields were actually populated
+                                    time.sleep(0.2)  # Brief pause for field updates
+                                    actual_email = email_field.get_attribute('value')
+                                    actual_value = value_field.get_attribute('value')
+                                    
+                                    if actual_email != row[email_column]:
+                                        print(f"  ! Warning: New rule email field shows '{actual_email}' instead of '{row[email_column]}'")
+                                    
+                                    expected_value = row['DEALERSHIP NAME'] if use_location_routing else row['FEED ID']
+                                    if actual_value != expected_value:
+                                        print(f"  ! Warning: New rule value field shows '{actual_value}' instead of '{expected_value}'")
+                                        # Try again if it didn't work
+                                        value_field.clear()
+                                        if use_location_routing:
+                                            value_field.send_keys(row['DEALERSHIP NAME'])
+                                        else:
+                                            value_field.send_keys(row['FEED ID'])
+                                        time.sleep(0.1)
+                                        actual_value = value_field.get_attribute('value')
+                                        print(f"  ! Retry result: New rule value field now shows '{actual_value}'")
+                                    
+                                    print(f"  ✓ Created rule {new_rule_index}: Email='{actual_email}', Value='{actual_value}'")
+                                    rules_configured += 1
+                                    data_index += 1
+                                else:
                                     print(f"  Could not click add button, stopping new rule creation")
                                     break
-                                    
-                                time.sleep(0.5)
-                                
-                                # Calculate the new rule index
-                                new_rule_index = existing_count + i
-                                
-                                # Fill the new rule
-                                email_field = driver.find_element(By.ID, f"routing_email_{new_rule_index}")
-                                email_field.clear()
-                                email_field.send_keys(row[email_column])
-                                
-                                if_dropdown = driver.find_element(By.ID, f"routing_field_id_{new_rule_index}")
-                                Select(if_dropdown).select_by_visible_text("Dealer ID")
-                                
-                                is_dropdown = driver.find_element(By.ID, f"routing_operator_{new_rule_index}")
-                                Select(is_dropdown).select_by_visible_text("is")
-                                
-                                value_field = driver.find_element(By.ID, f"routing_value_{new_rule_index}")
-                                value_field.clear()
-                                value_field.send_keys(row['FEED ID'])
-                                
-                                # Verify the new rule fields were actually populated
-                                time.sleep(0.2)  # Brief pause for field updates
-                                actual_email = email_field.get_attribute('value')
-                                actual_value = value_field.get_attribute('value')
-                                
-                                if actual_email != row[email_column]:
-                                    print(f"  ! Warning: New rule email field shows '{actual_email}' instead of '{row[email_column]}'")
-                                if actual_value != row['FEED ID']:
-                                    print(f"  ! Warning: New rule value field shows '{actual_value}' instead of '{row['FEED ID']}'")
-                                    # Try again if it didn't work
-                                    value_field.clear()
-                                    value_field.send_keys(row['FEED ID'])
-                                    time.sleep(0.1)
-                                    actual_value = value_field.get_attribute('value')
-                                    print(f"  ! Retry result: New rule value field now shows '{actual_value}'")
-                                
-                                print(f"  ✓ Created rule {new_rule_index}: Email='{actual_email}', Value='{actual_value}'")
-                                rules_configured += 1
-                                data_index += 1
-                                
-                            else:
-                                print(f"  No add button found, stopping at {rules_configured} rules")
-                                break
                                 
                         except Exception as e:
                             print(f"  ✗ Error creating new rule: {e}")

@@ -8,49 +8,54 @@ Before starting, ensure:
 
 - **WARP VPN MUST BE DISABLED** - The script cannot access Jumpcloud SSO with WARP enabled
 - **Manual Authentication** - You must manually complete website login → Jumpcloud SSO → WordPress admin in the automation window
-- **Chrome must be at version 137** - This is due to the chrome-driver binary 
+- **Chrome must be updated** - Check chrome://settings/help for latest version
+- **Github Account is created** - You must have a Github account to access the project repository
 
 ## 📋 System Requirements
 
-- **Python**: 3.8 or higher
-- **Operating System**: macOS
-- **Chrome**: Version 317+
+- **Python**: 3.8 or higher (3.12 recommended)
+- **Operating System**: macOS, Windows, or Linux
+- **Chrome**: Latest version (check chrome://settings/help)
+- **Terminal**: macOS comes with Terminal (zsh/bash) pre-installed
+- **Command Line Tools**: Will be installed automatically with Homebrew
 
 ## 🔧 Installation
 
-### Quick Setup (Recommended)
+### Step 1: Install Prerequisites
 
-1. **Clone/Download** this project to your computer
-2. **Run the setup script**:
-   ```bash
-   python setup.py
-   ```
+**Open Terminal:**
+- Press `Cmd + Space`, type "Terminal", and press Enter
+- All commands below work in both zsh (default) and bash
 
-The setup script will:
-- Check your Python version compatibility
-- Install all required packages
-- Create configuration templates
-- Guide you through the setup process
+**Install Homebrew (macOS only):**
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
 
-### Manual Installation
+**Install Git:**
+```bash
+brew install git
+```
 
-If the quick setup doesn't work, follow these steps:
+**Install Python (if needed):**
+- Download from: https://www.python.org/downloads/
+- Choose Python 3.12 (recommended) or 3.8+
 
-#### Step 1: Check Python Version
-This tool works with **Python 3.8 or higher**. Check your version:
+**Update Chrome:**
+1. Open Chrome
+2. Go to: `chrome://settings/help`
+3. Chrome will automatically check and update
+4. Restart Chrome when prompted
+
+### Step 2: Check Python Version
 ```bash
 python --version
 # or
 python3 --version
 ```
-Install Homebrew first
-```/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"```
+*Make sure you have Python 3.8 or higher*
 
-Then install Git ```$ brew install git```
-
-If python is needed download from - https://www.python.org/downloads/
-
-#### Step 2: Create Virtual Environment (Recommended)
+### Step 3: Create Virtual Environment (Recommended)
 ```bash
 # Create virtual environment
 python -m venv leadrouter-env
@@ -58,10 +63,16 @@ python -m venv leadrouter-env
 # Activate it
 # On macOS/Linux:
 source leadrouter-env/bin/activate
+
+# On Windows:
+leadrouter-env\Scripts\activate
 ```
 
-#### Step 3: Install Dependencies
+### Step 4: Navigate to Project and Install Dependencies
 ```bash
+# Navigate to project folder
+cd lead-router
+
 # Upgrade pip first (important!)
 python -m pip install --upgrade pip
 
@@ -69,130 +80,134 @@ python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-### 🐛 Troubleshooting Installation Issues
+### Step 5: Set Up Google Credentials
+1. Download your `credentials.json` file (provided by admin)
+2. Place it in the `lead-router` folder
 
+## 🚀 How to Use
 
-#### Common Issues
-- **"No module named 'X'"**: Make sure you activated your virtual environment
-- **Permission errors**: Try adding `--user` flag: `pip install --user -r requirements.txt`
+### Step 1: Prepare Your Google Sheet
+Your Google Sheet must have a tab named **"Combined Feed Info"** with these columns:
+- **DEALERSHIP NAME** - The dealership name
+- **FEED ID** - Used for Dealer ID routing  
+- **ADF Email** - Email for ADF/XML notifications
+- **Text Email** - Email for Text notifications
 
-## 📋 Configuration
-
-
+### Step 2: Run the Script
 ```bash
-# macOS
-CHROME_BINARY_PATH=/Applications/Google Chrome.app/Contents/MacOS/Google Chrome
-CHROMEDRIVER_PATH=./chrome-for-testing/chromedriver
+python main.py
+```
 
-## 🚀 Usage
+### Step 3: Follow the Prompts
+1. **Enter Google Sheet URL** - Paste your sheet URL or ID
+2. **Enter WordPress URL** - Enter your site URL (e.g., https://yoursite.com)
+3. **Wait for Chrome to open** - Look for window with yellow bar saying "Chrome is being controlled by automated test software"
 
-1. **Prepare your Google Sheet** with columns:
-   - `DEALERSHIP NAME`
-   - `FEED ID`
-   - `ADF Email`
-   - `Text Email`
+### Step 4: Complete Authentication
+In the **automation Chrome window** (with yellow bar):
+1. Navigate to your WordPress admin dashboard
+2. Complete website login → Jumpcloud SSO → WordPress admin
+3. Make sure you reach the WordPress dashboard
+4. Press Enter in the terminal when ready
 
-2. **Run the automation**:
-   ```bash
-   python main.py
-   ```
+### Step 5: Answer Prompts
+- Script will ask about Text Notifications for location-based forms
+- Choose 'y' for yes or 'n' for no
 
-3. **Follow the prompts**:
-   - Enter your Google Sheet URL or ID
-   - Enter your WordPress site URL
-   - Complete manual authentication in the browser window
+### Step 6: Wait for Completion
+The script will automatically:
+- Find all active forms
+- Configure routing rules based on your Google Sheet
+- Show progress and completion summary
 
-## 🔍 System Requirements
+## 🔄 How It Works
 
-- **Python**: 3.8 or higher (3.12 recommended, 3.13 has some package compatibility issues)
-- **Operating System**: Windows, macOS, or Linux
-- **Browser**: Google Chrome
-- **Memory**: At least 2GB RAM
-- **Network**: Internet connection for Google Sheets API and web automation
+### Smart Form Detection
+The script automatically detects two types of forms:
 
+**Forms WITH "Choose A Location" field (Priority)**
+- Uses location-based routing
+- Selects dealership name from Google Sheet
+- Uses corresponding email from same row
 
-## 🆘 Getting Help
+**Forms WITH "Dealer ID" field (Fallback)**
+- Uses dealer ID routing  
+- Uses Feed ID from Google Sheet
+- Uses corresponding email from same row
 
-If you're still having issues:
+## 🛠 Troubleshooting
 
-1. **Check the error message** - most issues are in the installation step
-2. **Try using Python 3.12** instead of 3.13 if you're having package issues
-3. **Make sure you're using a virtual environment**
-4. **Update pip** before installing: `python -m pip install --upgrade pip`
+### Installation Issues
 
-## 🔍 Troubleshooting
+**"No module named 'X'"**
+- Make sure you activated your virtual environment
+- Try: `source leadrouter-env/bin/activate`
 
-### Common Issues
+**Permission errors**
+- Try: `pip install --user -r requirements.txt`
 
-**"WebDriver session is broken"**
-- The automation Chrome window was closed
-- Solution: Restart script, use the NEW automation window
+**Python not found**
+- Download from: https://www.python.org/downloads/
+- Make sure Python is in your PATH
 
-**"Not on WordPress admin page"**
-- Manual navigation incomplete
-- Solution: Navigate to WordPress admin dashboard before pressing Enter
-
-**"WARP VPN Blocking Authentication"**
-- WARP VPN is still enabled
-- Solution: Completely disable WARP VPN and restart authentication
+### Chrome Issues
 
 **"Version mismatch between Chrome and ChromeDriver"**
-- Chrome auto-updated but ChromeDriver didn't
-- Solution: Use included Chrome for Testing or update ChromeDriver
+1. Update Chrome: Go to `chrome://settings/help`
+2. Restart Chrome
+3. Restart the script
+
+**"Chrome not found"**
+- Make sure Chrome is installed
+- Update to latest version: `chrome://settings/help`
+
+### Runtime Issues
+
+**"WARP VPN Blocking Authentication"**
+- Completely disable WARP VPN
+- Restart authentication
+
+**"WebDriver session is broken"**
+- Don't close the automation Chrome window
+- Restart script if window was closed
 
 **"Missing or empty values in sheet"**
-- Required columns are missing or have empty cells
-- Solution: Fill all cells in required columns
+- Fill all required columns in Google Sheet
+- Check for empty cells
 
-### Debug Mode
+**"Forms not found"**
+- Make sure you're on WordPress admin dashboard
+- Check that Gravity Forms plugin is installed
 
-For troubleshooting, the script creates:
-- Debug screenshots on errors
-- Detailed console logging
-- Chrome automation profile preservation
-
-## 📁 Project Structure
+## 📁 File Structure
 
 ```
 lead-router/
-├── main.py                 # Main automation script
-├── requirements.txt        # Python dependencies
-├── README.md              # This file
-├── .env                   # Environment variables (you create)
-├── credentials.json       # Google API credentials (you create)
-├── token.json            # Generated OAuth token
-└── chrome-for-testing/   # Chrome automation browser
-    ├── chromedriver      # WebDriver executable
+├── main.py              # Main script
+├── requirements.txt     # Dependencies  
+├── credentials.json     # Google API credentials (you add this)
+├── token.json          # Generated automatically
+└── README.md           # This file
 ```
 
-## 🔒 Security Notes
+## ⚠️ Important Notes
 
-- **Private Repository** - All credentials are pre-configured for trusted users
-- **Shared Access** - Google Sheets and WordPress access is shared among authorized team members
-- **Use the automation Chrome profile only** for this script
-- **Fresh profile isolates** automation from your personal browsing
-- **WARP VPN must be disabled** during authentication for Jumpcloud SSO access
-- **Google Cloud Console Sheets API** this gives all users in org access to the sheets API with these pre-configured credentials
+- **Use only the automation Chrome window** (with yellow bar)
+- **Keep the automation window open** during the process
+- **WARP VPN must be OFF** for authentication to work
+- **Don't interact with the automation window** while script is running
+- **Keep Chrome updated** - Check `chrome://settings/help` regularly
 
-## 🎯 Features
+## 🎯 What the Script Does
 
-- **Batch Processing**: Handles multiple forms automatically
-- **Smart Routing**: Configures both ADF/XML and Text notifications
-- **Error Recovery**: Continues processing after individual form failures
-- **Progress Tracking**: Clear progress indicators and completion summaries
-- **Resume Capability**: Skips already completed forms on restart
-- **Manual Authentication**: Secure SSO integration without storing credentials
-
-## 📞 Support
-
-If you encounter issues:
-
-1. **Check WARP VPN** is disabled
-2. **Verify all prerequisites** are installed
-3. **Review error messages** for specific guidance
-4. **Check debug screenshots** for visual confirmation of errors
-5. **Restart with fresh Chrome profile** if WebDriver issues persist
+1. Reads dealership data from your Google Sheet
+2. Opens Chrome for automation
+3. Waits for you to authenticate manually
+4. Finds all active Gravity Forms
+5. Configures notification routing rules for each form
+6. Uses smart logic to match dealership names with emails
+7. Shows detailed progress and completion summary
 
 ---
 
-**⚠️ Remember: WARP VPN must be OFF for Jumpcloud SSO to work properly!** 
+**Ready to automate your form routing? Just follow the steps above!** 
