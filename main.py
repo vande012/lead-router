@@ -543,6 +543,8 @@ class LeadRouter:
 
             # Track completed forms by ID
             completed_form_ids = set()
+            forms_with_errors = []  # Track forms that had errors but were still processed
+            skipped_forms = []  # Track forms that were skipped due to missing fields
             
             # Process each form by ID
             for form_index, form_info in enumerate(all_form_info):
@@ -590,19 +592,40 @@ class LeadRouter:
                     wait.until(EC.presence_of_element_located((By.LINK_TEXT, "Notifications")))
                     driver.find_element(By.LINK_TEXT, "Notifications").click()
 
+                    # Track results for this form
+                    form_skipped = False
+                    form_failed = False
+                    
                     # Process ADF/XML notification first
-                    self._process_notification(driver, wait, sheet_data, "ADF/XML Formatted Notification", "ADF Email", form_title, form_id, Select, use_location_routing)
+                    adf_result = self._process_notification(driver, wait, sheet_data, "ADF/XML Formatted Notification", "ADF Email", form_title, form_id, Select, use_location_routing)
+                    if adf_result == "skipped":
+                        form_skipped = True
+                    elif adf_result == "failed":
+                        form_failed = True
                     
-                    # Process Text notification second (will prompt user for location-based forms)
-                    self._process_notification(driver, wait, sheet_data, "Text Formatted Notification", "Text Email", form_title, form_id, Select, use_location_routing)
+                    # Process Text notification second (only if ADF didn't fail/skip)
+                    if not form_skipped and not form_failed:
+                        text_result = self._process_notification(driver, wait, sheet_data, "Text Formatted Notification", "Text Email", form_title, form_id, Select, use_location_routing)
+                        if text_result == "skipped":
+                            form_skipped = True
+                        elif text_result == "failed":
+                            form_failed = True
                     
-                    # Mark this form as completed
-                    completed_form_ids.add(form_id)
-                    print(f"✓ Successfully completed form: {form_title} (ID: {form_id})")
+                    # Categorize the form based on results
+                    if form_skipped:
+                        print(f"⏭️  Skipped form (missing required fields): {form_title} (ID: {form_id})")
+                        skipped_forms.append({'id': form_id, 'title': form_title})
+                    elif form_failed:
+                        print(f"❌ Failed to process form: {form_title} (ID: {form_id})")
+                        # Don't add to any completion list - this is a true failure
+                    else:
+                        # Mark this form as completed successfully
+                        completed_form_ids.add(form_id)
+                        print(f"✓ Successfully completed form: {form_title} (ID: {form_id})")
                     
-                    # Only navigate back if we have more forms to process
-                    remaining_forms = [f for f in all_form_info if f['id'] not in completed_form_ids]
-                    if remaining_forms:
+                    # Only navigate back if we have more forms to process and this form wasn't skipped/failed
+                    remaining_forms = [f for f in all_form_info if f['id'] not in completed_form_ids and f['id'] not in [sf['id'] for sf in skipped_forms]]
+                    if remaining_forms and not form_skipped and not form_failed:
                         print(f"Returning to forms list... ({len(remaining_forms)} forms remaining)")
                         
                         # Check if we're already on the forms page before attempting navigation
@@ -643,7 +666,10 @@ class LeadRouter:
                                 print("Could not determine current page state")
                         
                     else:
-                        print("No more forms to process - skipping navigation back")
+                        if form_skipped or form_failed:
+                            print("Form was skipped/failed - moving to next form")
+                        else:
+                            print("No more forms to process - skipping navigation back")
                     
                 except Exception as e:
                     # Enhanced error reporting
@@ -677,29 +703,64 @@ class LeadRouter:
             print("="*60)
             print(f"Total forms found: {total_forms}")
             print(f"Successfully processed: {len(completed_form_ids)}")
-            print(f"Failed or skipped: {total_forms - len(completed_form_ids)}")
+            print(f"Skipped (missing fields): {len(skipped_forms)}")
+            print(f"Failed: {total_forms - len(completed_form_ids) - len(skipped_forms)}")
             print("")
             
             if completed_form_ids:
-                print("✓ COMPLETED FORMS:")
+                print("✅ SUCCESSFULLY PROCESSED FORMS:")
                 for form_info in all_form_info:
                     if form_info['id'] in completed_form_ids:
-                        print(f"  • {form_info['title']} (ID: {form_info['id']})")
+                        print(f"  ✓ {form_info['title']} (ID: {form_info['id']})")
             
-            failed_forms = [f for f in all_form_info if f['id'] not in completed_form_ids]
+            if skipped_forms:
+                print(f"\n⏭️  SKIPPED FORMS ({len(skipped_forms)} total):")
+                print("These forms were skipped because required fields were not available:")
+                for skipped_form in skipped_forms:
+                    print(f"  • {skipped_form['title']} (ID: {skipped_form['id']})")
+                print("\nReasons forms get skipped:")
+                print("  - No 'Dealer ID' field found (for dealer-id-based routing)")
+                print("  - No 'Choose A Location' or location field found (for location-based routing)")
+                print("  - Form structure doesn't support the required routing type")
+            
+            failed_forms = [f for f in all_form_info if f['id'] not in completed_form_ids and f['id'] not in [sf['id'] for sf in skipped_forms]]
             if failed_forms:
-                print("\n✗ FAILED/SKIPPED FORMS:")
+                print(f"\n❌ FAILED FORMS ({len(failed_forms)} total):")
+                print("These forms encountered errors during processing:")
                 for form_info in failed_forms:
                     print(f"  • {form_info['title']} (ID: {form_info['id']})")
+                print("\nCommon causes of form failures:")
+                print("  - WordPress/Gravity Forms interface errors")
+                print("  - Network connectivity issues")
+                print("  - Unexpected form structure changes")
+                print("  - Browser automation errors")
             
             print(f"\n{'='*60}")
             
             if len(completed_form_ids) == total_forms:
                 print("🎉 ALL FORMS PROCESSED SUCCESSFULLY!")
             elif len(completed_form_ids) > 0:
-                print(f"⚠️  PARTIAL SUCCESS: {len(completed_form_ids)}/{total_forms} forms completed")
+                processed_count = len(completed_form_ids)
+                skipped_count = len(skipped_forms)
+                failed_count = len(failed_forms)
+                
+                if skipped_count > 0 and failed_count == 0:
+                    print(f"✅ PARTIAL SUCCESS: {processed_count}/{total_forms} forms completed")
+                    print(f"   ({skipped_count} forms skipped due to missing required fields)")
+                elif failed_count > 0 and skipped_count == 0:
+                    print(f"⚠️  PARTIAL SUCCESS: {processed_count}/{total_forms} forms completed")
+                    print(f"   ({failed_count} forms failed due to errors)")
+                elif skipped_count > 0 and failed_count > 0:
+                    print(f"⚠️  PARTIAL SUCCESS: {processed_count}/{total_forms} forms completed")
+                    print(f"   ({skipped_count} skipped, {failed_count} failed)")
+                else:
+                    print(f"✅ SUCCESS: {processed_count}/{total_forms} forms completed")
             else:
-                print("❌ NO FORMS COMPLETED - Please check for errors above")
+                print("❌ NO FORMS COMPLETED")
+                if len(skipped_forms) > 0:
+                    print(f"   All {len(skipped_forms)} forms were skipped due to missing required fields")
+                if len(failed_forms) > 0:
+                    print(f"   {len(failed_forms)} forms failed due to errors")
             
             print("="*60)
                     
@@ -718,7 +779,7 @@ class LeadRouter:
             if use_location_routing and notification_name == "Text Formatted Notification":
                 if not self.prompt_for_text_notifications():
                     print(f"Skipping {notification_name} for location-based form as requested by user")
-                    return
+                    return "skipped"
             
             # 3c. Find and click the notification link directly
             print(f"Looking for {notification_name} link...")
@@ -769,7 +830,7 @@ class LeadRouter:
                             pass
                 except Exception as e:
                     print(f"Could not list {notification_name} links: {e}")
-                return
+                return "failed"
             
             print(f"Clicking {notification_name} notification link...")
             notification_link.click()
@@ -786,10 +847,53 @@ class LeadRouter:
                     print(f"{notification_name} Configure Routing is already selected")
             except Exception as e:
                 print(f"Could not find Configure Routing radio button for {notification_name}: {e}")
-                return
+                return "failed"
+
+            # Check if required fields are available before processing
+            print(f"Checking if required fields are available for {notification_name}...")
+            try:
+                # Check the first routing field dropdown to see what's available
+                if_dropdown = driver.find_element(By.ID, "routing_field_id_0")
+                from selenium.webdriver.support.ui import Select
+                select = Select(if_dropdown)
+                available_options = [option.text.strip() for option in select.options if option.text.strip()]
+                
+                print(f"Available routing fields: {available_options}")
+                
+                # Check for required fields based on routing type
+                if use_location_routing:
+                    # Check for location fields
+                    location_fields = ["Choose A Location", "Location", "Dealership Location", "Store Location", "Dealer Location"]
+                    has_location_field = any(field in available_options for field in location_fields)
+                    
+                    if not has_location_field:
+                        # Also check for any field containing "location"
+                        has_location_field = any("location" in opt.lower() for opt in available_options)
+                    
+                    if not has_location_field:
+                        print(f"❌ SKIPPING FORM: No location field found for {notification_name}")
+                        print(f"   Required: One of {location_fields} or field containing 'location'")
+                        print(f"   Available: {available_options}")
+                        return "skipped"
+                else:
+                    # Check for Dealer ID field
+                    dealer_id_fields = ["Dealer ID", "Dealership ID", "Dealer", "ID"]
+                    has_dealer_id_field = any(field in available_options for field in dealer_id_fields)
+                    
+                    if not has_dealer_id_field:
+                        print(f"❌ SKIPPING FORM: No Dealer ID field found for {notification_name}")
+                        print(f"   Required: One of {dealer_id_fields}")
+                        print(f"   Available: {available_options}")
+                        return "skipped"
+                
+                print(f"✓ Required fields are available for {notification_name}")
+                
+            except Exception as e:
+                print(f"Error checking available fields for {notification_name}: {e}")
+                return "failed"
 
             # 3e. Fill blank rules first, then add new ones if needed
-            print(f"Configuring {notification_name} routing rules (filling blanks first)...")
+            print(f"Configuring {notification_name} routing rules...")
             routing_type = "location-based" if use_location_routing else "dealer-id-based"
             print(f"Using {routing_type} routing strategy")
             
@@ -847,21 +951,15 @@ class LeadRouter:
                         if_dropdown = driver.find_element(By.ID, f"routing_field_id_{rule_index}")
                         
                         if use_location_routing:
-                            # Use location-based routing with priority field selection
-                            location_field_names = [
-                                "Choose A Location"
-                            ]
+                            # Use location-based routing - try priority fields first
+                            location_field_names = ["Choose A Location", "Location", "Dealership Location", "Store Location", "Dealer Location"]
                             
                             field_selected = False
-                            selected_field_name = None
-                            
-                            # Try to select the highest priority location field available
                             for location_name in location_field_names:
                                 try:
                                     Select(if_dropdown).select_by_visible_text(location_name)
-                                    selected_field_name = location_name
                                     field_selected = True
-                                    print(f"  ✓ Selected priority location field: {location_name}")
+                                    print(f"  ✓ Selected location field: {location_name}")
                                     break
                                 except:
                                     continue
@@ -873,23 +971,24 @@ class LeadRouter:
                                     if "location" in option.text.lower():
                                         try:
                                             select_obj.select_by_visible_text(option.text)
-                                            selected_field_name = option.text
                                             field_selected = True
                                             print(f"  ✓ Selected location field: {option.text}")
                                             break
                                         except:
                                             continue
-                            
-                            # Last resort: select first non-default option
-                            if not field_selected:
-                                print(f"  ⚠️  No location field found, selecting first available option")
-                                select_obj = Select(if_dropdown)
-                                if len(select_obj.options) > 1:  # Skip the default "Select a Field" option
-                                    select_obj.select_by_index(1)
-                                    selected_field_name = select_obj.first_selected_option.text
-                                    print(f"  ⚠️  Selected fallback field: {selected_field_name}")
                         else:
-                            Select(if_dropdown).select_by_visible_text("Dealer ID")
+                            # Use dealer ID routing - try priority fields first
+                            dealer_id_fields = ["Dealer ID", "Dealership ID", "Dealer", "ID"]
+                            
+                            field_selected = False
+                            for dealer_field in dealer_id_fields:
+                                try:
+                                    Select(if_dropdown).select_by_visible_text(dealer_field)
+                                    field_selected = True
+                                    print(f"  ✓ Selected dealer field: {dealer_field}")
+                                    break
+                                except:
+                                    continue
                         
                         is_dropdown = driver.find_element(By.ID, f"routing_operator_{rule_index}")
                         Select(is_dropdown).select_by_visible_text("is")
@@ -1080,21 +1179,15 @@ class LeadRouter:
                                     if_dropdown = driver.find_element(By.ID, f"routing_field_id_{new_rule_index}")
                                     
                                     if use_location_routing:
-                                        # Use location-based routing with priority field selection
-                                        location_field_names = [
-                                            "Choose A Location"
-                                        ]
+                                        # Use location-based routing - try priority fields first
+                                        location_field_names = ["Choose A Location", "Location", "Dealership Location", "Store Location", "Dealer Location"]
                                         
                                         field_selected = False
-                                        selected_field_name = None
-                                        
-                                        # Try to select the highest priority location field available
                                         for location_name in location_field_names:
                                             try:
                                                 Select(if_dropdown).select_by_visible_text(location_name)
-                                                selected_field_name = location_name
                                                 field_selected = True
-                                                print(f"  ✓ Selected priority location field: {location_name}")
+                                                print(f"  ✓ Selected location field: {location_name}")
                                                 break
                                             except:
                                                 continue
@@ -1106,23 +1199,24 @@ class LeadRouter:
                                                 if "location" in option.text.lower():
                                                     try:
                                                         select_obj.select_by_visible_text(option.text)
-                                                        selected_field_name = option.text
                                                         field_selected = True
                                                         print(f"  ✓ Selected location field: {option.text}")
                                                         break
                                                     except:
                                                         continue
-                                        
-                                        # Last resort: select first non-default option
-                                        if not field_selected:
-                                            print(f"  ⚠️  No location field found, selecting first available option")
-                                            select_obj = Select(if_dropdown)
-                                            if len(select_obj.options) > 1:  # Skip the default "Select a Field" option
-                                                select_obj.select_by_index(1)
-                                                selected_field_name = select_obj.first_selected_option.text
-                                                print(f"  ⚠️  Selected fallback field: {selected_field_name}")
                                     else:
-                                        Select(if_dropdown).select_by_visible_text("Dealer ID")
+                                        # Use dealer ID routing - try priority fields first
+                                        dealer_id_fields = ["Dealer ID", "Dealership ID", "Dealer", "ID"]
+                                        
+                                        field_selected = False
+                                        for dealer_field in dealer_id_fields:
+                                            try:
+                                                Select(if_dropdown).select_by_visible_text(dealer_field)
+                                                field_selected = True
+                                                print(f"  ✓ Selected dealer field: {dealer_field}")
+                                                break
+                                            except:
+                                                continue
                                     
                                     is_dropdown = driver.find_element(By.ID, f"routing_operator_{new_rule_index}")
                                     Select(is_dropdown).select_by_visible_text("is")
@@ -1261,6 +1355,7 @@ class LeadRouter:
                         
             except Exception as e:
                 print(f"Error configuring {notification_name} routing rules: {e}")
+                return "failed"
 
             # Save the notification settings
             print(f"Saving {notification_name} notification settings...")
@@ -1271,6 +1366,7 @@ class LeadRouter:
                 print(f"{notification_name} notification saved successfully")
             except Exception as e:
                 print(f"Could not find or click save button for {notification_name}: {e}")
+                return "failed"
             
             logger.info(f"{notification_name} updated for form: {form_title}")
             
@@ -1279,10 +1375,13 @@ class LeadRouter:
                 print(f"Returning to notifications list for {notification_name}...")
                 driver.get(f"{self.wp_url.rstrip('/')}/wp/wp-admin/admin.php?page=gf_edit_forms&view=settings&subview=notification&id={form_id}")
                 wait.until(EC.presence_of_element_located((By.LINK_TEXT, "Notifications")))
+            
+            return "success"
                 
         except Exception as e:
             print(f"Error processing {notification_name}: {e}")
             logger.error(f"Error processing {notification_name}: {e}")
+            return "failed"
 
     def run(self):
         try:
