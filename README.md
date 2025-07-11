@@ -88,6 +88,7 @@ Your Google Sheet must have a tab named **"Combined Feed Info"** with these colu
 - **FEED ID** - Used for Dealer ID routing  
 - **ADF Email** - Email for ADF/XML notifications
 - **Text Email** - Email for Text notifications
+- **CHANGEME** - If Changeme is to be used, it MUST be formatted as CHANGEME@CHANGEME.COM for WP validation.
 
 ### Step 2: Run the Script
 ```bash

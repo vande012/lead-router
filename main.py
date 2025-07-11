@@ -775,12 +775,6 @@ class LeadRouter:
     def _process_notification(self, driver, wait, sheet_data, notification_name, email_column, form_title, form_id, Select, use_location_routing=False):
         """Helper method to process a single notification type"""
         try:
-            # For location-based routing, ask user about Text Notifications
-            if use_location_routing and notification_name == "Text Formatted Notification":
-                if not self.prompt_for_text_notifications():
-                    print(f"Skipping {notification_name} for location-based form as requested by user")
-                    return "skipped"
-            
             # 3c. Find and click the notification link directly
             print(f"Looking for {notification_name} link...")
             notification_link = None
@@ -849,8 +843,8 @@ class LeadRouter:
                 print(f"Could not find Configure Routing radio button for {notification_name}: {e}")
                 return "failed"
 
-            # Check if required fields are available before processing
-            print(f"Checking if required fields are available for {notification_name}...")
+            # Check what fields are actually available in THIS notification and determine routing type
+            print(f"Checking available fields for {notification_name}...")
             try:
                 # Check the first routing field dropdown to see what's available
                 if_dropdown = driver.find_element(By.ID, "routing_field_id_0")
@@ -860,30 +854,37 @@ class LeadRouter:
                 
                 print(f"Available routing fields: {available_options}")
                 
-                # Check for required fields based on routing type
-                if use_location_routing:
-                    # Check for location fields
-                    location_fields = ["Choose A Location", "Location", "Dealership Location", "Store Location", "Dealer Location"]
-                    has_location_field = any(field in available_options for field in location_fields)
-                    
-                    if not has_location_field:
-                        # Also check for any field containing "location"
-                        has_location_field = any("location" in opt.lower() for opt in available_options)
-                    
-                    if not has_location_field:
-                        print(f"❌ SKIPPING FORM: No location field found for {notification_name}")
-                        print(f"   Required: One of {location_fields} or field containing 'location'")
-                        print(f"   Available: {available_options}")
-                        return "skipped"
+                # Check for location fields first (PRIORITY)
+                location_fields = ["Choose A Location", "Location", "Dealership Location", "Store Location", "Dealer Location"]
+                has_location_field = any(field in available_options for field in location_fields)
+                
+                if not has_location_field:
+                    # Also check for any field containing "location"
+                    has_location_field = any("location" in opt.lower() for opt in available_options)
+                
+                # Check for Dealer ID field
+                dealer_id_fields = ["Dealer ID", "Dealership ID", "Dealer", "ID"]
+                has_dealer_id_field = any(field in available_options for field in dealer_id_fields)
+                
+                # DETERMINE ROUTING FOR THIS SPECIFIC NOTIFICATION
+                if has_location_field:
+                    # Location fields take priority
+                    actual_use_location_routing = True
+                    print(f"✓ {notification_name} will use LOCATION-BASED routing")
+                elif has_dealer_id_field:
+                    # Fall back to Dealer ID routing
+                    actual_use_location_routing = False
+                    print(f"✓ {notification_name} will use DEALER-ID-BASED routing")
                 else:
-                    # Check for Dealer ID field
-                    dealer_id_fields = ["Dealer ID", "Dealership ID", "Dealer", "ID"]
-                    has_dealer_id_field = any(field in available_options for field in dealer_id_fields)
-                    
-                    if not has_dealer_id_field:
-                        print(f"❌ SKIPPING FORM: No Dealer ID field found for {notification_name}")
-                        print(f"   Required: One of {dealer_id_fields}")
-                        print(f"   Available: {available_options}")
+                    # No suitable fields found - skip
+                    print(f"❌ SKIPPING {notification_name}: No suitable routing fields found")
+                    print(f"   Available fields: {available_options}")
+                    return "skipped"
+                
+                # For Text notifications on location-based forms, ask user preference
+                if actual_use_location_routing and notification_name == "Text Formatted Notification":
+                    if not self.prompt_for_text_notifications():
+                        print(f"Skipping {notification_name} for location-based form as requested by user")
                         return "skipped"
                 
                 print(f"✓ Required fields are available for {notification_name}")
@@ -891,6 +892,9 @@ class LeadRouter:
             except Exception as e:
                 print(f"Error checking available fields for {notification_name}: {e}")
                 return "failed"
+
+            # Use the actual routing type determined for this notification
+            use_location_routing = actual_use_location_routing
 
             # 3e. Fill blank rules first, then add new ones if needed
             print(f"Configuring {notification_name} routing rules...")
@@ -906,28 +910,100 @@ class LeadRouter:
                 print(f"Found {existing_count} existing rule slots")
                 print(f"Need to configure {needed_count} rules")
                 
-                # Check which existing rules are blank or incomplete
+                # Check which existing rules are blank, incomplete, or already match our data
                 blank_rules = []
                 filled_rules = []
+                duplicate_rules = []
                 
                 for i in range(existing_count):
                     try:
                         email_field = driver.find_element(By.ID, f"routing_email_{i}")
                         value_field = driver.find_element(By.ID, f"routing_value_{i}")
+                        if_dropdown = driver.find_element(By.ID, f"routing_field_id_{i}")
+                        is_dropdown = driver.find_element(By.ID, f"routing_operator_{i}")
                         
                         email_value = email_field.get_attribute('value').strip()
                         routing_value = value_field.get_attribute('value').strip()
+                        
+                        # Get current field and operator selections
+                        current_field_selection = Select(if_dropdown).first_selected_option.text.strip()
+                        current_operator_selection = Select(is_dropdown).first_selected_option.text.strip()
                         
                         if not email_value or not routing_value:
                             blank_rules.append(i)
                             print(f"  Rule {i} is blank/incomplete")
                         else:
-                            filled_rules.append(i)
-                            print(f"  Rule {i} is already filled: {email_value}")
-                    except:
-                        blank_rules.append(i)  # If we can't find fields, consider it blank
+                            # Check if this rule matches any of our data
+                            rule_is_duplicate = False
+                            for row in sheet_data:
+                                expected_email = row[email_column]
+                                expected_value = row['DEALERSHIP NAME'] if use_location_routing else row['FEED ID']
+                                
+                                # Check if this rule matches the current row's data
+                                email_matches = email_value == expected_email
+                                value_matches = routing_value == expected_value
+                                
+                                # Check field selection matches
+                                field_matches = False
+                                if use_location_routing:
+                                    location_field_names = ["Choose A Location", "Location", "Dealership Location", "Store Location", "Dealer Location"]
+                                    field_matches = (current_field_selection in location_field_names or 
+                                                   "location" in current_field_selection.lower())
+                                else:
+                                    dealer_id_fields = ["Dealer ID", "Dealership ID", "Dealer", "ID"]
+                                    field_matches = current_field_selection in dealer_id_fields
+                                
+                                # Check operator matches
+                                operator_matches = current_operator_selection.lower() == "is"
+                                
+                                # If all match, this rule is already set up correctly
+                                if email_matches and value_matches and field_matches and operator_matches:
+                                    rule_is_duplicate = True
+                                    print(f"  Rule {i} already matches data: {expected_email} -> {expected_value} (SKIPPING)")
+                                    break
+                            
+                            if rule_is_duplicate:
+                                duplicate_rules.append(i)
+                            else:
+                                filled_rules.append(i)
+                                print(f"  Rule {i} is filled but doesn't match our data: {email_value} -> {routing_value}")
+                    except Exception as e:
+                        print(f"  Error checking rule {i}: {e}")
+                        blank_rules.append(i)  # If we can't check it, consider it blank
                 
-                print(f"Found {len(blank_rules)} blank rules, {len(filled_rules)} filled rules")
+                print(f"Found {len(blank_rules)} blank rules, {len(filled_rules)} filled rules (different data), {len(duplicate_rules)} duplicate rules (skipped)")
+                
+                # Remove duplicates from our data to process
+                remaining_data = []
+                for row in sheet_data:
+                    expected_email = row[email_column]
+                    expected_value = row['DEALERSHIP NAME'] if use_location_routing else row['FEED ID']
+                    
+                    # Check if this data is already configured in any rule
+                    already_configured = False
+                    for i in duplicate_rules:
+                        try:
+                            email_field = driver.find_element(By.ID, f"routing_email_{i}")
+                            value_field = driver.find_element(By.ID, f"routing_value_{i}")
+                            
+                            existing_email = email_field.get_attribute('value').strip()
+                            existing_value = value_field.get_attribute('value').strip()
+                            
+                            if existing_email == expected_email and existing_value == expected_value:
+                                already_configured = True
+                                break
+                        except:
+                            continue
+                    
+                    if not already_configured:
+                        remaining_data.append(row)
+                
+                needed_count = len(remaining_data)
+                print(f"Need to configure {needed_count} rules (after removing duplicates)")
+                
+                if needed_count == 0:
+                    print(f"All data is already configured! No changes needed for {notification_name}")
+                    return "success"
                 
                 # Fill blank rules first with our data
                 data_index = 0
@@ -938,7 +1014,7 @@ class LeadRouter:
                     if data_index >= needed_count:
                         break  # No more data to fill
                         
-                    row = sheet_data[data_index]
+                    row = remaining_data[data_index]
                     print(f"Filling blank rule {rule_index} with: {row['DEALERSHIP NAME']} -> {row[email_column]}")
                     
                     try:
@@ -1121,15 +1197,15 @@ class LeadRouter:
                         continue
                 
                 # If we still have more data, create new rules
-                remaining_data = needed_count - data_index
-                if remaining_data > 0:
-                    print(f"Creating {remaining_data} new rules for remaining data...")
+                remaining_data_count = needed_count - data_index
+                if remaining_data_count > 0:
+                    print(f"Creating {remaining_data_count} new rules for remaining data...")
                     
-                    for i in range(remaining_data):
+                    for i in range(remaining_data_count):
                         if data_index >= needed_count:
                             break
                             
-                        row = sheet_data[data_index]
+                        row = remaining_data[data_index]
                         print(f"Creating new rule for: {row['DEALERSHIP NAME']} -> {row[email_column]}")
                         
                         # Add a new rule
@@ -1171,7 +1247,7 @@ class LeadRouter:
                                     # Calculate the new rule index
                                     new_rule_index = existing_count + i
                                     
-                                    # Fill the new rule
+                                    # Fill the new rule with duplicate checking logic applied earlier
                                     email_field = driver.find_element(By.ID, f"routing_email_{new_rule_index}")
                                     email_field.clear()
                                     email_field.send_keys(row[email_column])
