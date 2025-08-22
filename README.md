@@ -31,6 +31,7 @@ Before starting, ensure:
 ```bash
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 ```
+If restricted access manually install the .pkg file here - https://github.com/Homebrew/brew/releases
 
 **Install Git:**
 ```bash
